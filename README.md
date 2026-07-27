@@ -1,37 +1,29 @@
-# BuzzClawAGI 🐝🦑🧠
+# BuzzClawAGI
 
-**The threesome from heaven.**
+**Real integration of Buzz + ZeroClaw + OpenAGI**
 
-Buzz (Nostr workspace) + ZeroClaw (hardened runtime) + OpenAGI (proactive brain) living in one body.
+This is no longer a manifesto. This repo now contains the working glue that makes the three systems talk to each other.
 
-## Quick Start (the orgy begins)
+## Architecture (actual)
 
-```bash
-git clone https://github.com/Questing-VR/BuzzClawAGI
-cd BuzzClawAGI
-cp .env.example .env   # fill keys
-docker compose up
-```
+- **Buzz** = the shared room (Nostr relay + channels + identity)
+- **ZeroClaw** = the hardened agent body (already has native ACP)
+- **OpenAGI** = the proactive brain (daemon that watches + decides)
 
-This spins:
-- Buzz relay + web UI
-- ZeroClaw runtime (sandboxed agent)
-- OpenAGI observer (proactive watcher)
-- ACP bridge so they talk to each other
+ZeroClaw joins Buzz as a first-class agent via its built-in ACP support.
+OpenAGI runs as a daemon and pushes decisions into ZeroClaw / Buzz via the bridge.
 
-Agents appear as full members in Buzz channels with their own Nostr keys.
+## Current status
 
-## How they fuck
+- ZeroClaw ACP connection to Buzz is documented and scripted
+- OpenAGI → ZeroClaw bridge started
+- Launch scripts and docker-compose that use *your* forks
+- Config templates for the three-way handshake
 
-1. **Buzz** owns the room (channels, signed events, Git, human presence)
-2. **ZeroClaw** owns the body (sandbox, tools, memory, security)
-3. **OpenAGI** owns the brain (watches activity, scores signals, spawns specialists, self-improves)
+## How to run (real path)
 
-The bridge (ACP) lets OpenAGI tell ZeroClaw "do this", ZeroClaw reports back with signed results into Buzz, and humans see everything in one place.
+1. Make sure the three parent forks exist in your account (they do).
+2. Clone this repo.
+3. Follow `docs/RUN.md`
 
-See `INTEGRATION.md` and `ARCHITECTURE.md` for the dirty details.
-
-Parent forks:
-- https://github.com/Questing-VR/buzz
-- https://github.com/Questing-VR/zeroclaw
-- https://github.com/Questing-VR/openAGI
+We are building the real thing now.
