@@ -7,3 +7,10 @@ __pycache__/
 venv/
 *.egg-info/
 .DS_Store
+
+# Parent forks cloned by scripts/install.* (large; not committed)
+deps/buzz/
+deps/zeroclaw/
+deps/openAGI/
+deps/path.ps1
+deps/path.sh

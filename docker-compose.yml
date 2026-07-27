@@ -10,9 +10,10 @@
 #   docker compose --profile bridge-only up --build
 #   docker compose --profile full up --build
 
-x-openagi-path: &openagi_path ${OPENAGI_PATH:-../openAGI}
-x-zeroclaw-path: &zeroclaw_path ${ZEROCLAW_PATH:-../zeroclaw}
-x-buzz-path: &buzz_path ${BUZZ_PATH:-../buzz}
+# Prefer deps/ from ./install.ps1|sh; override with OPENAGI_PATH etc.
+x-openagi-path: &openagi_path ${OPENAGI_PATH:-./deps/openAGI}
+x-zeroclaw-path: &zeroclaw_path ${ZEROCLAW_PATH:-./deps/zeroclaw}
+x-buzz-path: &buzz_path ${BUZZ_PATH:-./deps/buzz}
 
 services:
   openagi:
