@@ -1,0 +1,45 @@
+services:
+  buzz:
+    image: ghcr.io/block/buzz:latest  # or build from your fork
+    ports:
+      - "3000:3000"
+    volumes:
+      - buzz-data:/data
+    environment:
+      - RELAY_URL=ws://buzz:8080
+
+  zeroclaw:
+    build:
+      context: ../zeroclaw
+      dockerfile: Dockerfile
+    volumes:
+      - zeroclaw-data:/data
+    environment:
+      - ACP_PORT=9001
+
+  openagi:
+    build:
+      context: ../openAGI
+      dockerfile: Dockerfile
+    volumes:
+      - openagi-data:/data
+    environment:
+      - ACP_PORT=9002
+      - ZEROCLAW_ACP=http://zeroclaw:9001
+      - BUZZ_RELAY=ws://buzz:8080
+
+  bridge:
+    build: ./bridge
+    depends_on:
+      - buzz
+      - zeroclaw
+      - openagi
+    environment:
+      - BUZZ_URL=http://buzz:3000
+      - ZEROCLAW_ACP=http://zeroclaw:9001
+      - OPENAGI_ACP=http://openagi:9002
+
+volumes:
+  buzz-data:
+  zeroclaw-data:
+  openagi-data:

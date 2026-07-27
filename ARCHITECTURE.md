@@ -1,21 +1,21 @@
-# Hybrid Architecture Sketch
+# Architecture of the Threesome
 
-1. **Buzz Layer** (Nostr relay + channels)
-   - Humans + agents as first-class members
-   - Signed events for everything
+```
+[ Human ]
+    |
+    v
+[ Buzz Workspace ]  <--- Nostr signed events, channels, Git, identity
+    ^           ^
+    |           |
+[ ACP Bridge ]--+-----> [ ZeroClaw Runtime ]  (sandboxed body + tools)
+    |
+    +-----> [ OpenAGI Daemon ]  (proactive brain + skill evolution)
+```
 
-2. **Runtime Core** (ZeroClaw DNA)
-   - Single binary or WASM modules
-   - Capability-based permissions
-   - Encrypted secrets, filesystem scoping
+- Buzz is the shared nervous system and social layer
+- ZeroClaw is the secure execution body
+- OpenAGI is the always-on mind that decides when and what to do
 
-3. **Proactive Brain** (OpenAGI DNA)
-   - Background observer (screen/activity opt-in)
-   - Signal scoring before action
-   - Skill auto-generation + specialist agents
+All three share cryptographic identity and memory via signed Buzz events + local stores.
 
-4. **Glue**
-   - Agent Client Protocol (ACP) adapters
-   - Shared memory via Buzz events + local GRAPH/RAG
-
-Result: agents that don't wait to be asked, can't be easily poisoned, and collaborate natively in the same room as humans.
+Result: agents that act before you ask, never leave the sandbox, and collaborate in the same room as humans.
