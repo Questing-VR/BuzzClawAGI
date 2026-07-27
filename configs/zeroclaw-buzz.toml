@@ -1,0 +1,18 @@
+# Example ZeroClaw config that joins Buzz via ACP
+# Place this (or merge) into ~/.zeroclaw/config.toml
+
+[providers.models.openai.main]
+model = "gpt-4o"
+# or whatever you use
+
+[agents.buzzclaw]
+model_provider = "openai.main"
+risk_profile = "supervised"
+
+[channels.acp.buzz]
+# ZeroClaw native ACP channel pointed at Buzz
+enabled = true
+# Exact keys depend on ZeroClaw version — check `zeroclaw channels acp --help`
+# Common pattern:
+buzz_relay = "ws://localhost:3000"
+# or acp_endpoint / stdio mode

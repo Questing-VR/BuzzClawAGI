@@ -1,65 +1,105 @@
 #!/usr/bin/env python3
 """
-Real bridge: OpenAGI proactive decisions → ZeroClaw ACP / Buzz
-
-This is the start of the actual integration.
+BuzzClawAGI Bridge v2
+OpenAGI (proactive brain) → ZeroClaw (hardened body) → Buzz (shared room)
 """
 
 import os
 import time
+import json
 import requests
-from typing import Any
+from datetime import datetime
 
 OPENAGI_URL = os.getenv("OPENAGI_URL", "http://127.0.0.1:43210")
-ZEROCLAW_ACP = os.getenv("ZEROCLAW_ACP", "http://127.0.0.1:9001")  # or stdio later
-BUZZ_RELAY = os.getenv("BUZZ_RELAY", "ws://localhost:3000")
+ZEROCLAW_ACP_URL = os.getenv("ZEROCLAW_ACP_URL", "http://127.0.0.1:9001")
+BUZZ_CLI = os.getenv("BUZZ_CLI", "buzz-cli")  # if available in PATH
+POLL_INTERVAL = int(os.getenv("POLL_INTERVAL", "8"))
 
-def poll_openagi_signals():
-    """Poll OpenAGI for new proactive decisions / suggested actions."""
-    try:
-        # OpenAGI exposes activity / observations / suggested skills
-        r = requests.get(f"{OPENAGI_URL}/observations/search?q=proactive", timeout=5)
-        if r.status_code == 200:
-            return r.json()
-    except Exception as e:
-        print(f"OpenAGI poll error: {e}")
-    return []
+def log(msg: str):
+    print(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}")
 
-def send_to_zeroclaw(action: dict[str, Any]):
-    """Send a tool call or command to ZeroClaw via ACP."""
-    # ZeroClaw ACP is JSON-RPC. This is the shape.
+def get_openagi_activity():
+    """Pull recent proactive signals / suggested skills / observations."""
+    endpoints = [
+        "/observations/search?q=act",
+        "/skills",
+        "/memory",
+    ]
+    results = []
+    for ep in endpoints:
+        try:
+            r = requests.get(f"{OPENAGI_URL}{ep}", timeout=4)
+            if r.status_code == 200:
+                data = r.json()
+                if isinstance(data, list):
+                    results.extend(data)
+                elif isinstance(data, dict):
+                    results.append(data)
+        except Exception as e:
+            log(f"OpenAGI {ep} error: {e}")
+    return results
+
+def call_zeroclaw(tool: str, args: dict):
+    """Send a tool call to ZeroClaw (ACP shape)."""
     payload = {
         "jsonrpc": "2.0",
         "method": "tools/call",
         "params": {
-            "name": action.get("tool", "shell"),
-            "arguments": action.get("args", {})
+            "name": tool,
+            "arguments": args
         },
-        "id": 1
+        "id": int(time.time())
     }
+    log(f"→ ZeroClaw tool={tool}")
     try:
-        # Placeholder — real ACP is usually stdio or dedicated endpoint
-        print(f"[bridge] → ZeroClaw: {payload}")
-        # requests.post(ZEROCLAW_ACP, json=payload)  # when HTTP ACP is available
+        # When ZeroClaw exposes HTTP ACP this will work.
+        # Until then it prints the call so you can wire stdio.
+        r = requests.post(ZEROCLAW_ACP_URL, json=payload, timeout=10)
+        log(f"ZeroClaw response: {r.status_code}")
+        return r.json() if r.ok else None
     except Exception as e:
-        print(f"ZeroClaw error: {e}")
+        log(f"ZeroClaw call failed (expected if no HTTP ACP yet): {e}")
+        # Fallback: print the JSON-RPC so it can be piped into stdio ACP
+        print(json.dumps(payload))
+        return None
+
+def post_to_buzz(text: str):
+    """Best-effort post into Buzz (via buzz-cli if available)."""
+    log(f"Would post to Buzz: {text[:120]}...")
+    # Real version will use buzz-cli or direct Nostr event
+
+def process_signal(sig: dict):
+    """Map an OpenAGI signal into a ZeroClaw action."""
+    sig_type = str(sig.get("type", "")).lower()
+    name = str(sig.get("name", sig.get("skill", "unknown")))
+
+    if "skill" in sig_type or "suggested" in str(sig).lower():
+        call_zeroclaw("run_skill", {"skill": name, "source": "openagi"})
+        post_to_buzz(f"OpenAGI suggested skill `{name}` — handed to ZeroClaw")
+    elif "act" in sig_type or "scrutiny" in str(sig).lower():
+        call_zeroclaw("shell", {"command": "echo 'proactive action received'"})
+        post_to_buzz(f"OpenAGI decided to act: {name}")
+    else:
+        log(f"Ignoring signal type: {sig_type}")
 
 def main():
-    print("BuzzClawAGI bridge started")
-    print(f"OpenAGI: {OPENAGI_URL}")
-    print(f"ZeroClaw ACP: {ZEROCLAW_ACP}")
-    print(f"Buzz: {BUZZ_RELAY}")
+    log("BuzzClawAGI bridge v2 started")
+    log(f"OpenAGI  → {OPENAGI_URL}")
+    log(f"ZeroClaw → {ZEROCLAW_ACP_URL}")
+
+    seen = set()
 
     while True:
-        signals = poll_openagi_signals()
+        signals = get_openagi_activity()
         for sig in signals:
-            # Very rough mapping for now
-            if sig.get("type") in ("suggested_skill", "proactive_action", "scrutiny_act"):
-                send_to_zeroclaw({
-                    "tool": "run_skill" if "skill" in str(sig).lower() else "shell",
-                    "args": sig
-                })
-        time.sleep(10)
+            # crude dedup
+            key = json.dumps(sig, sort_keys=True)[:200]
+            if key in seen:
+                continue
+            seen.add(key)
+            process_signal(sig)
+
+        time.sleep(POLL_INTERVAL)
 
 if __name__ == "__main__":
     main()

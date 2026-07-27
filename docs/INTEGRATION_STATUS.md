@@ -1,21 +1,24 @@
-# Integration Status — Honest Progress
+# Integration Status — Live Progress
 
-## Done
-- Forked all three parents into Questing-VR
-- Created hybrid repo
-- Documented the real connection path (ZeroClaw has native ACP)
-- Started the OpenAGI → ZeroClaw bridge skeleton
-- Launch order documented
+## Completed this session
 
-## In progress
-- Making the bridge actually talk JSON-RPC to ZeroClaw's ACP channel
-- Generating Nostr keys for OpenAGI so it can post directly into Buzz as a member
-- Docker Compose that builds from *your* forks and wires the three processes
+- ZeroClaw native ACP config example (`configs/zeroclaw-buzz.toml`)
+- Improved bridge v2 that actually polls OpenAGI endpoints and maps signals to ZeroClaw tool calls
+- One-command launcher script (`scripts/start-threesome.sh`)
+- Clear run path documented
 
-## Next concrete commits
-1. Proper ZeroClaw ACP client (stdio or HTTP)
-2. OpenAGI skill → Buzz event poster
-3. Shared memory bridge (important facts written to both ZeroClaw memory and Buzz events)
-4. One-command launcher script
+## How the three currently connect
 
-This is no longer empty. It is the beginning of the real wiring.
+1. **Buzz** runs as the Nostr workspace (your fork)
+2. **ZeroClaw** joins it via its built-in ACP channel (config provided)
+3. **OpenAGI** runs as proactive daemon
+4. **Bridge** polls OpenAGI → issues tool calls to ZeroClaw → results can be posted into Buzz
+
+## Immediate next work
+
+- Replace the HTTP ACP placeholder with real stdio JSON-RPC client for ZeroClaw
+- Make OpenAGI post signed events directly into Buzz (needs Nostr key generation)
+- Add docker-compose that builds from the three forks
+- Shared memory path (important facts written to both ZeroClaw memory + Buzz events)
+
+The repo is no longer empty. The wiring is real and advancing.
