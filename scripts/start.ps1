@@ -60,7 +60,8 @@ function Start-OpenAgi {
     & $patch -OpenAgiPath $OaDir
   }
 
-  $node = (Get-Command node -ErrorAction SilentlyContinue)?.Source
+  $nodeCmd = Get-Command node -ErrorAction SilentlyContinue
+  $node = if ($nodeCmd) { $nodeCmd.Source } else { $null }
   if (-not $node) {
     throw "node.exe not found. Install Node.js 22+ from https://nodejs.org"
   }
@@ -95,7 +96,8 @@ function Start-OpenAgi {
     # Fallback: npm.cmd (never bare "npm" — that resolves to npm.ps1 and can open Notepad)
     $npmCmd = Join-Path (Split-Path $node -Parent) "npm.cmd"
     if (-not (Test-Path $npmCmd)) {
-      $npmCmd = (Get-Command npm.cmd -ErrorAction SilentlyContinue)?.Source
+      $npmFound = Get-Command npm.cmd -ErrorAction SilentlyContinue
+      $npmCmd = if ($npmFound) { $npmFound.Source } else { $null }
     }
     if (-not $npmCmd) {
       throw "Neither examples/hosted-server.js nor npm.cmd found under $OaDir"
