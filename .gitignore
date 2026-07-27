@@ -14,3 +14,4 @@ deps/zeroclaw/
 deps/openAGI/
 deps/path.ps1
 deps/path.sh
+.openagi-data/

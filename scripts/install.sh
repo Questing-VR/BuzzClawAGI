@@ -52,6 +52,27 @@ if [[ "$SKIP_NPM" -eq 0 ]]; then
     echo "WARN: Node not found — install Node 22+"
   else
     (cd "$DEPS/openAGI" && (npm ci 2>/dev/null || npm install))
+    # Soft-fail fsync (harmless on Linux; needed if deps shared with Windows)
+    if [[ -f "$DEPS/openAGI/src/file-utils.js" ]]; then
+      python3 - <<'PY' || true
+from pathlib import Path
+p = Path("deps/openAGI/src/file-utils.js")
+# path relative — fix below
+PY
+      FU="$DEPS/openAGI/src/file-utils.js"
+      if ! grep -q 'buzzclaw-fsync-softfail' "$FU" 2>/dev/null; then
+        python3 -c "
+from pathlib import Path
+p=Path(r'''$FU''')
+t=p.read_text()
+old='fs.fsyncSync(fd);'
+new='try { fs.fsyncSync(fd); } catch (err) { /* buzzclaw-fsync-softfail */ if (err && err.code !== \"EPERM\" && err.code !== \"EINVAL\" && err.code !== \"ENOTSUP\") throw err; }'
+if old in t and 'buzzclaw-fsync-softfail' not in t:
+    p.write_text(t.replace(old,new))
+    print('patched', p)
+"
+      fi
+    fi
   fi
 else
   echo "Skipping npm"

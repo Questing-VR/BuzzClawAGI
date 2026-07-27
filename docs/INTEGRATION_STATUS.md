@@ -70,3 +70,11 @@ Use the root installers instead:
 **Cause:** `Start-Process npm` resolves to Node’s PowerShell shim `npm.ps1`, which is not a real server process.
 
 **Fix:** start OpenAGI with `node examples/hosted-server.js`, log to `.bridge-state/openagi.*.log`, **wait for `/health`** before starting the bridge, abort with a clear error if health never comes up.
+
+## Fixed: OpenAGI dies on Windows with `EPERM fsync`
+
+**Symptom:** logs show `Error: EPERM: operation not permitted, fsync` in `file-utils.js`; port 43210 never listens.
+
+**Cause:** OpenAGI `writeTextAtomic` fsyncs a file opened read-only; Windows often returns EPERM.
+
+**Fix:** `scripts/patch-openagi-windows.ps1` (run from install/start) soft-fails fsync on EPERM/EINVAL. Verified `/health` → 200 after patch.

@@ -54,22 +54,35 @@ function Start-OpenAgi {
     throw "OpenAGI not found at $OaDir — run .\install.ps1 first"
   }
 
+  # Soft-fail fsync on Windows (OpenAGI bug: fsync on read fd → EPERM)
+  $patch = Join-Path $Root "scripts\patch-openagi-windows.ps1"
+  if (Test-Path $patch) {
+    & $patch -OpenAgiPath $OaDir
+  }
+
   $node = (Get-Command node -ErrorAction SilentlyContinue)?.Source
   if (-not $node) {
     throw "node.exe not found. Install Node.js 22+ from https://nodejs.org"
   }
 
+  # Writable data dir for this project (avoid mysterious home-dir permission issues)
+  if (-not $env:OPENAGI_DATA_DIR) {
+    $env:OPENAGI_DATA_DIR = Join-Path $Root ".openagi-data"
+  }
+  New-Item -ItemType Directory -Force -Path $env:OPENAGI_DATA_DIR | Out-Null
+  if (-not $env:PORT) { $env:PORT = "43210" }
+  if (-not $env:HOST) { $env:HOST = "127.0.0.1" }
+
   # Prefer direct node entry (avoids Windows npm.ps1 / Notepad trap with Start-Process)
   $entry = Join-Path $OaDir "examples\hosted-server.js"
-  if (-not (Test-Path $entry)) {
-    $entry = Join-Path $OaDir "examples\hosted-server.js"
-  }
 
   $stdout = Join-Path $LogDir "openagi.stdout.log"
   $stderr = Join-Path $LogDir "openagi.stderr.log"
 
+  # Build env block for child (Start-Process inherits current process env)
   if (Test-Path $entry) {
     Write-Host "Starting OpenAGI via: node $entry"
+    Write-Host "OPENAGI_DATA_DIR=$($env:OPENAGI_DATA_DIR)"
     Write-Host "Logs: $stdout"
     $proc = Start-Process -PassThru `
       -WorkingDirectory $OaDir `

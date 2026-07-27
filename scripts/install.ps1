@@ -61,9 +61,15 @@ if (-not $SkipNpm) {
     $nodeVer = (node -v)
     Write-Host "Node $nodeVer"
     Push-Location $OaPath
-    if (Test-Path package-lock.json) { npm ci } else { npm install }
+    # Use npm.cmd on Windows — bare "npm" is npm.ps1 and can open Notepad under some hosts
+    $npm = if (Test-Path (Join-Path (Split-Path (Get-Command node).Source -Parent) "npm.cmd")) {
+      Join-Path (Split-Path (Get-Command node).Source -Parent) "npm.cmd"
+    } else { "npm.cmd" }
+    if (Test-Path package-lock.json) { & $npm ci } else { & $npm install }
     Pop-Location
     Write-Host "OpenAGI deps installed."
+    # Windows fsync EPERM workaround in OpenAGI atomic writes
+    & (Join-Path $Root "scripts\patch-openagi-windows.ps1") -OpenAgiPath $OaPath
   }
 } else {
   Write-Host "Skipping OpenAGI npm (-SkipNpm)"
