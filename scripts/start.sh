@@ -60,12 +60,38 @@ if [[ "$BRIDGE_ONLY" -eq 0 ]]; then
     echo "OpenAGI missing at $OPENAGI_PATH — run ./scripts/install.sh"
     exit 1
   fi
-  echo "Starting OpenAGI..."
-  (cd "$OPENAGI_PATH" && npm run serve) &
+  ENTRY="$OPENAGI_PATH/examples/hosted-server.js"
+  LOGDIR="${BRIDGE_STATE_DIR:-$ROOT/.bridge-state}"
+  mkdir -p "$LOGDIR"
+  echo "Starting OpenAGI via node $ENTRY ..."
+  if [[ -f "$ENTRY" ]]; then
+    (cd "$OPENAGI_PATH" && node "$ENTRY" >"$LOGDIR/openagi.stdout.log" 2>"$LOGDIR/openagi.stderr.log") &
+  else
+    (cd "$OPENAGI_PATH" && npm run serve >"$LOGDIR/openagi.stdout.log" 2>"$LOGDIR/openagi.stderr.log") &
+  fi
   OA_PID=$!
-  sleep 3
+  echo "OpenAGI pid=$OA_PID — waiting for /health"
+  ok=0
+  for i in $(seq 1 60); do
+    if curl -sf "${OPENAGI_URL}/health" >/dev/null 2>&1; then
+      echo "OpenAGI is up"
+      ok=1
+      break
+    fi
+    if ! kill -0 "$OA_PID" 2>/dev/null; then
+      echo "OpenAGI exited early — see $LOGDIR/openagi.stderr.log"
+      tail -n 40 "$LOGDIR/openagi.stderr.log" 2>/dev/null || true
+      exit 1
+    fi
+    sleep 1
+  done
+  if [[ "$ok" -ne 1 ]]; then
+    echo "OpenAGI did not become healthy — aborting (see $LOGDIR/openagi.stderr.log)"
+    exit 1
+  fi
 fi
 
 echo "Starting bridge..."
 cd "$ROOT/bridge"
-exec python3 openagi_to_zeroclaw.py
+export BRIDGE_STATE_DIR="${BRIDGE_STATE_DIR:-$ROOT/.bridge-state}"
+python3 openagi_to_zeroclaw.py

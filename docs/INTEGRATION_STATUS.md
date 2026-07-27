@@ -1,6 +1,6 @@
 # Integration Status — Live Progress
 
-**Last updated:** 2026-07-27 (monorepo install path)
+**Last updated:** 2026-07-27 (Windows start fix: node not npm.ps1)
 
 ## Direct answer: “Are all three integrated as expected?”
 
@@ -62,3 +62,11 @@ Use the root installers instead:
 - Rust builds of Buzz/ZeroClaw can fail without system deps — install still leaves OpenAGI+bridge usable  
 - `ACP_AUTO_PERMISSION=allow-once` is a security tradeoff for unattended bridge  
 - Buzz relay is heavier than `npm run serve` — may need Docker/`just` from the buzz fork  
+
+## Fixed: Windows start opened npm.ps1 in Notepad
+
+**Symptom:** `.\start.ps1 -DryRun` → Notepad opens `npm.ps1`, port 43210 refused, bridge spams connection errors.
+
+**Cause:** `Start-Process npm` resolves to Node’s PowerShell shim `npm.ps1`, which is not a real server process.
+
+**Fix:** start OpenAGI with `node examples/hosted-server.js`, log to `.bridge-state/openagi.*.log`, **wait for `/health`** before starting the bridge, abort with a clear error if health never comes up.

@@ -140,18 +140,39 @@ def main() -> int:
     buzz = BuzzPublisher(state_dir=str(STATE_DIR))
     seen = SeenStore(STATE_DIR / "seen_ids.txt", max_size=MAX_SEEN)
 
-    if not openagi.health():
+    healthy = openagi.health()
+    if not healthy:
         log.warning(
-            "OpenAGI /health failed at %s — will keep polling (daemon may start later)",
+            "OpenAGI /health failed at %s — will retry quietly until it is up "
+            "(start with scripts/start.ps1 so the daemon launches correctly on Windows)",
             OPENAGI_URL,
         )
 
     acp = open_acp_client(dry_run=DRY_RUN)
     memory = SharedMemory(openagi=openagi, zeroclaw=None if DRY_RUN else acp, buzz=buzz, dry_run=DRY_RUN)
+    down_streak = 0
 
     try:
         while True:
             try:
+                if not openagi.health():
+                    down_streak += 1
+                    # Log once, then every ~10 failed cycles — avoid spam
+                    if down_streak == 1 or down_streak % 10 == 0:
+                        log.warning(
+                            "OpenAGI still unreachable at %s (attempt %d)",
+                            OPENAGI_URL,
+                            down_streak,
+                        )
+                    if ONCE:
+                        log.error("BRIDGE_ONCE set and OpenAGI is down — exit 1")
+                        return 1
+                    time.sleep(POLL_INTERVAL)
+                    continue
+                if down_streak:
+                    log.info("OpenAGI is reachable again after %d failed polls", down_streak)
+                    down_streak = 0
+
                 signals = openagi.collect_signals(include_observations=INCLUDE_OBS)
                 log.debug("polled %d raw items", len(signals))
                 for raw in signals:
