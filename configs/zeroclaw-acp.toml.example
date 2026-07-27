@@ -1,0 +1,16 @@
+# Minimal ZeroClaw config notes for ACP + BuzzClawAGI
+# Merge into ~/.zeroclaw/config.toml (paths vary by install).
+# Verify against your installed `zeroclaw` version — schema drifts.
+
+[acp]
+max_sessions = 10
+session_timeout_secs = 3600
+# default_agent = "buzzclaw"   # when multiple [agents.*] exist
+
+# Example agent (names/fields depend on ZeroClaw version)
+# [agents.buzzclaw]
+# enabled = true
+# model_provider = "..."
+
+# Risk / autonomy: for unsupervised bridge prompts you likely need tools
+# that don't block forever on approvals, OR set ACP_AUTO_PERMISSION on the bridge.

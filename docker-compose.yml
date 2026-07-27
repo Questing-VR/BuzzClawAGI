@@ -1,45 +1,96 @@
+# BuzzClawAGI — glue orchestration
+#
+# Profiles:
+#   bridge-only  — OpenAGI + bridge (parents on host or external)
+#   full         — also build Buzz + ZeroClaw from sibling forks (heavy)
+#
+# Usage:
+#   # parent forks expected as siblings unless overridden:
+#   #   ../buzz  ../zeroclaw  ../openAGI
+#   docker compose --profile bridge-only up --build
+#   docker compose --profile full up --build
+
+x-openagi-path: &openagi_path ${OPENAGI_PATH:-../openAGI}
+x-zeroclaw-path: &zeroclaw_path ${ZEROCLAW_PATH:-../zeroclaw}
+x-buzz-path: &buzz_path ${BUZZ_PATH:-../buzz}
+
 services:
+  openagi:
+    profiles: ["bridge-only", "full"]
+    build:
+      context: *openagi_path
+      dockerfile: Dockerfile
+    ports:
+      - "43210:43210"
+    environment:
+      HOST: "0.0.0.0"
+      PORT: "43210"
+      OPENAGI_DATA_DIR: /data
+    volumes:
+      - openagi-data:/data
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:43210/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  bridge:
+    profiles: ["bridge-only", "full"]
+    build:
+      context: ./bridge
+      dockerfile: Dockerfile
+    depends_on:
+      openagi:
+        condition: service_started
+    environment:
+      OPENAGI_URL: http://openagi:43210
+      OPENAGI_AUTH_TOKEN: ${OPENAGI_AUTH_TOKEN:-}
+      ZEROCLAW_ACP_CMD: ${ZEROCLAW_ACP_CMD:-zeroclaw acp}
+      # Prefer mounting host zeroclaw binary or run bridge on host for stdio ACP.
+      # Inside pure docker, set DRY_RUN=1 unless you also run zeroclaw in-network.
+      DRY_RUN: ${DRY_RUN:-1}
+      POLL_INTERVAL: ${POLL_INTERVAL:-8}
+      BRIDGE_STATE_DIR: /data/bridge-state
+      BUZZ_CLI: ${BUZZ_CLI:-buzz}
+      BUZZ_PRIVATE_KEY: ${BUZZ_PRIVATE_KEY:-}
+      BUZZ_RELAY_URL: ${BUZZ_RELAY_URL:-ws://buzz:3000}
+      BUZZ_CHANNEL_ID: ${BUZZ_CHANNEL_ID:-}
+      BUZZ_OWNER_PUBKEY: ${BUZZ_OWNER_PUBKEY:-}
+      ACP_AUTO_PERMISSION: ${ACP_AUTO_PERMISSION:-allow-once}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    volumes:
+      - bridge-data:/data
+    restart: unless-stopped
+
+  # Heavy: build ZeroClaw from fork. ACP is normally stdio — expose gateway if configured.
+  zeroclaw:
+    profiles: ["full"]
+    build:
+      context: *zeroclaw_path
+      dockerfile: Dockerfile
+    volumes:
+      - zeroclaw-data:/data
+    environment:
+      # Gateway / data paths depend on ZeroClaw image entrypoint; override as needed.
+      ZEROCLAW_DATA_DIR: /data
+    # No fictional ACP HTTP port — use `zeroclaw acp` via buzz-acp or host bridge.
+
   buzz:
-    image: ghcr.io/block/buzz:latest  # or build from your fork
+    profiles: ["full"]
+    build:
+      context: *buzz_path
+      dockerfile: Dockerfile
     ports:
       - "3000:3000"
     volumes:
       - buzz-data:/data
     environment:
-      - RELAY_URL=ws://buzz:8080
-
-  zeroclaw:
-    build:
-      context: ../zeroclaw
-      dockerfile: Dockerfile
-    volumes:
-      - zeroclaw-data:/data
-    environment:
-      - ACP_PORT=9001
-
-  openagi:
-    build:
-      context: ../openAGI
-      dockerfile: Dockerfile
-    volumes:
-      - openagi-data:/data
-    environment:
-      - ACP_PORT=9002
-      - ZEROCLAW_ACP=http://zeroclaw:9001
-      - BUZZ_RELAY=ws://buzz:8080
-
-  bridge:
-    build: ./bridge
-    depends_on:
-      - buzz
-      - zeroclaw
-      - openagi
-    environment:
-      - BUZZ_URL=http://buzz:3000
-      - ZEROCLAW_ACP=http://zeroclaw:9001
-      - OPENAGI_ACP=http://openagi:9002
+      # Align with buzz fork env (see buzz/.env.example)
+      BUZZ_RELAY_URL: ws://0.0.0.0:3000
 
 volumes:
-  buzz-data:
-  zeroclaw-data:
   openagi-data:
+  bridge-data:
+  zeroclaw-data:
+  buzz-data:

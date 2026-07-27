@@ -1,21 +1,26 @@
-# Architecture of the Threesome
+# Architecture
 
 ```
 [ Human ]
     |
     v
-[ Buzz Workspace ]  <--- Nostr signed events, channels, Git, identity
+[ Buzz Workspace ]  <--- Nostr signed events, channels, identity
     ^           ^
     |           |
-[ ACP Bridge ]--+-----> [ ZeroClaw Runtime ]  (sandboxed body + tools)
-    |
-    +-----> [ OpenAGI Daemon ]  (proactive brain + skill evolution)
+[ buzz-acp ]----+---- stdio ACP ----> [ ZeroClaw `zeroclaw acp` ]
+    ^                                      ^
+    |                                      |
+    |                               [ bridge ACP client ]
+    |                                      ^
+    +----- buzz-cli posts -----------------+
+                                           |
+                                    [ OpenAGI daemon ]
+                                    observations / skills / suggestions
 ```
 
-- Buzz is the shared nervous system and social layer
-- ZeroClaw is the secure execution body
-- OpenAGI is the always-on mind that decides when and what to do
+- **Buzz** — shared room, identities, optional agent engrams (`buzz mem`)
+- **ZeroClaw** — sandboxed body via native ACP
+- **OpenAGI** — proactive brain (HTTP API on :43210)
+- **Bridge** — OpenAGI signals → ZeroClaw prompts → Buzz visibility + shared memory
 
-All three share cryptographic identity and memory via signed Buzz events + local stores.
-
-Result: agents that act before you ask, never leave the sandbox, and collaborate in the same room as humans.
+Fake HTTP “ACP servers” in older commits are obsolete; see `bridge/legacy/`.

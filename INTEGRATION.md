@@ -1,41 +1,48 @@
-# Integration Guide — Making the Threesome Work
+# Integration Guide
 
-## 1. Agent Client Protocol (ACP) Bridge
+## 1. Agent Client Protocol (real)
 
-Buzz speaks ACP. We make ZeroClaw and OpenAGI speak it too.
+ZeroClaw speaks ACP natively: `zeroclaw acp` (JSON-RPC 2.0, NDJSON stdio).
 
-`bridge/` contains:
-- `zeroclaw_acp.py` — thin ACP server wrapping ZeroClaw tools
-- `openagi_acp.py` — ACP server that exposes OpenAGI's proactive signals as tools/events
+Bridge client: `bridge/zeroclaw_acp_client.py`
 
-Buzz agents can then call them as first-class members.
+- `initialize` → `session/new` → `session/prompt`
+- Handles `session/request_permission` via `ACP_AUTO_PERMISSION`
+- Unit-tested with `bridge/tests/mock_acp_agent.py`
 
-## 2. Shared Identity
+Buzz attaches external agents with **`buzz-acp`**, not a custom HTTP port:
 
-Each agent gets its own Nostr keypair (generated on first run).
-Buzz treats them as equal members. Permissions are scoped per-channel via Buzz's auth model.
+```bash
+export BUZZ_ACP_AGENT_COMMAND=zeroclaw
+export BUZZ_ACP_AGENT_ARGS=acp
+buzz-acp
+```
 
-## 3. Memory Sync
+## 2. OpenAGI → ZeroClaw
 
-- ZeroClaw keeps local GRAPH/RAG + sandbox memory
-- OpenAGI keeps long-term user/profile + skill bank
-- Important facts are also written as signed Buzz events so the whole team sees them
+`bridge/openagi_to_zeroclaw.py` polls:
 
-## 4. Proactive Loop
+- `GET /proactive/suggestions`
+- `GET /pending-actions`
+- `GET /skills/suggested`
+- optional observations
 
-OpenAGI runs as daemon:
-1. Observes (opt-in screen/activity or Buzz events)
-2. Scores signals with Adaptive Scrutiny
-3. Decides to act → issues tool call via ACP to ZeroClaw
-4. ZeroClaw executes sandboxed → returns result
-5. Result + new skill (if any) posted back into Buzz channel
+Maps each signal to a sandbox-oriented prompt and runs it via ACP.
+
+## 3. Buzz posts + identity
+
+`bridge/buzz_publisher.py` calls `buzz messages send` when CLI + keys exist; otherwise appends `.bridge-state/buzz_outbox.jsonl`.
+
+Keys: `scripts/setup-agent-identity.md`
+
+## 4. Shared memory
+
+`bridge/shared_memory.py` dual-writes important facts to:
+
+1. OpenAGI `POST /memory/remember`
+2. ZeroClaw (prompt to store)
+3. Buzz `mem set` + channel note
 
 ## 5. Hardening
 
-Every tool call from OpenAGI goes through ZeroClaw's sandbox (WASM / Landlock / capability tokens). No poison allowed.
-
-## Next concrete steps
-
-- Flesh out the two ACP servers
-- Wire OpenAGI's skill writer to post skills into Buzz as reusable artifacts
-- Add a "specialist spawner" that creates new ZeroClaw instances on demand
+Tool execution stays inside ZeroClaw. Bridge should not shell out arbitrary commands except `zeroclaw` / `buzz` CLIs. Review `ACP_AUTO_PERMISSION` before production.

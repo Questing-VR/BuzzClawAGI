@@ -1,29 +1,45 @@
 # BuzzClawAGI
 
-**Real integration of Buzz + ZeroClaw + OpenAGI**
+Working glue for **Buzz** (Nostr workspace) + **ZeroClaw** (sandboxed ACP agent) + **OpenAGI** (proactive daemon).
 
-This is no longer a manifesto. This repo now contains the working glue that makes the three systems talk to each other.
+## Architecture
 
-## Architecture (actual)
+```
+OpenAGI (:43210) --HTTP--> bridge --stdio ACP--> zeroclaw acp
+                              |
+                              +-- buzz-cli --> Buzz relay (:3000)
 
-- **Buzz** = the shared room (Nostr relay + channels + identity)
-- **ZeroClaw** = the hardened agent body (already has native ACP)
-- **OpenAGI** = the proactive brain (daemon that watches + decides)
+Separately: buzz-acp spawns `zeroclaw acp` so ZeroClaw is a channel member.
+```
 
-ZeroClaw joins Buzz as a first-class agent via its built-in ACP support.
-OpenAGI runs as a daemon and pushes decisions into ZeroClaw / Buzz via the bridge.
+## Status
 
-## Current status
+See **[docs/INTEGRATION_STATUS.md](docs/INTEGRATION_STATUS.md)** for what is implemented vs still untested live.
 
-- ZeroClaw ACP connection to Buzz is documented and scripted
-- OpenAGI → ZeroClaw bridge started
-- Launch scripts and docker-compose that use *your* forks
-- Config templates for the three-way handshake
+## Quick start
 
-## How to run (real path)
+```bash
+cp .env.example .env
+# tests (no parents required)
+cd bridge && pip install -r requirements.txt && python -m pytest tests -q
+# dry-run bridge
+DRY_RUN=1 python openagi_to_zeroclaw.py
+```
 
-1. Make sure the three parent forks exist in your account (they do).
-2. Clone this repo.
-3. Follow `docs/RUN.md`
+Full run instructions: **[docs/RUN.md](docs/RUN.md)**  
+Identity setup: **[scripts/setup-agent-identity.md](scripts/setup-agent-identity.md)**
 
-We are building the real thing now.
+## Parent forks
+
+- https://github.com/Questing-VR/buzz  
+- https://github.com/Questing-VR/zeroclaw  
+- https://github.com/Questing-VR/openAGI  
+
+## Layout
+
+| Path | Role |
+|------|------|
+| `bridge/` | ACP client, OpenAGI client, Buzz publisher, main loop |
+| `configs/` | Env/config examples for ACP + buzz-acp |
+| `scripts/` | Launchers + identity notes |
+| `docker-compose.yml` | Profiles `bridge-only` / `full` |

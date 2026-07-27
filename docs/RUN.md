@@ -1,63 +1,107 @@
-# How to actually run the threesome
+# How to run BuzzClawAGI
 
 ## Prerequisites
 
-- Your three forks:
-  - https://github.com/Questing-VR/buzz
-  - https://github.com/Questing-VR/zeroclaw
-  - https://github.com/Questing-VR/openAGI
-- Docker + Docker Compose
-- Rust toolchain (for ZeroClaw / Buzz if building from source)
-- Node 20+ (for OpenAGI)
+Sibling forks (or override paths with `BUZZ_PATH`, `ZEROCLAW_PATH`, `OPENAGI_PATH`):
 
-## Step 1 — Start Buzz relay
+- https://github.com/Questing-VR/buzz  
+- https://github.com/Questing-VR/zeroclaw  
+- https://github.com/Questing-VR/openAGI  
 
-```bash
-cd ../buzz
-just setup
-just relay          # or just dev for full desktop
-```
+Also: Python 3.10+, Node 22+ (OpenAGI), Rust toolchains for Buzz/ZeroClaw if building from source.
 
-Buzz will be on `ws://localhost:3000`
-
-## Step 2 — Start ZeroClaw as a Buzz agent (ACP)
-
-ZeroClaw already speaks ACP natively.
+Copy env template:
 
 ```bash
-cd ../zeroclaw
-# configure an agent that uses ACP channel pointing at Buzz
-zeroclaw agent --acp --buzz-relay ws://localhost:3000
+cp .env.example .env
+# fill BUZZ_* and OPENAGI_AUTH_TOKEN as needed
 ```
 
-(Exact flag names may vary — check `zeroclaw channels acp --help` after install)
+## Path A — Proactive bridge (OpenAGI → ZeroClaw → Buzz)
 
-This makes ZeroClaw appear as a full member inside Buzz with its own keypair.
-
-## Step 3 — Start OpenAGI daemon
+### 1. OpenAGI daemon
 
 ```bash
 cd ../openAGI
 npm install
 npm run serve
+# http://127.0.0.1:43210  — GET /health
 ```
 
-OpenAGI runs on `http://127.0.0.1:43210`
+### 2. ZeroClaw ACP binary on PATH
 
-## Step 4 — Run the bridge
+```bash
+cd ../zeroclaw
+cargo build --release
+# ensure `zeroclaw` is on PATH; bridge runs: zeroclaw acp
+```
 
-From this repo:
+### 3. Buzz CLI (optional but needed for real posts)
+
+```bash
+cd ../buzz
+cargo build --release -p buzz-cli
+export PATH="$PWD/target/release:$PATH"
+# see scripts/setup-agent-identity.md
+```
+
+### 4. Bridge
 
 ```bash
 cd bridge
 pip install -r requirements.txt
+# dry run first (no ZeroClaw required):
+DRY_RUN=1 python openagi_to_zeroclaw.py
+# live:
+export OPENAGI_URL=http://127.0.0.1:43210
+export ZEROCLAW_ACP_CMD="zeroclaw acp"
+export BUZZ_CHANNEL_ID=...
+export BUZZ_PRIVATE_KEY=...
 python openagi_to_zeroclaw.py
 ```
 
-The bridge listens to OpenAGI proactive signals / decisions and turns them into ZeroClaw tool calls or Buzz posts.
+Windows:
 
-## What happens
+```powershell
+.\scripts\start-threesome.ps1
+```
 
-OpenAGI notices patterns → scores them → decides to act → bridge tells ZeroClaw → ZeroClaw executes sandboxed → result (and any new skill) is posted into the Buzz channel as a signed event.
+## Path B — ZeroClaw as Buzz channel member
 
-Humans see everything in one room.
+```bash
+# after building buzz-acp + zeroclaw
+export BUZZ_PRIVATE_KEY=nsec1...
+export BUZZ_RELAY_URL=ws://localhost:3000
+export BUZZ_ACP_AGENT_COMMAND=zeroclaw
+export BUZZ_ACP_AGENT_ARGS=acp
+buzz-acp
+```
+
+See `configs/buzz-acp.env.example`.
+
+## Docker (lean)
+
+```bash
+# with ../openAGI present
+docker compose --profile bridge-only up --build
+# default DRY_RUN=1 inside compose unless overridden
+```
+
+Full monorepo builds of Buzz/ZeroClaw: `--profile full` (heavy; may need fork-specific env).
+
+## Tests (no parents required)
+
+```bash
+cd bridge
+pip install -r requirements.txt
+python -m pytest tests -q
+```
+
+## What actually talks to what
+
+| Hop | Protocol |
+|-----|----------|
+| Bridge → OpenAGI | HTTP `GET /proactive/suggestions`, `/pending-actions`, `/skills/suggested`, … |
+| Bridge → ZeroClaw | ACP JSON-RPC 2.0 NDJSON over stdio (`session/prompt`) |
+| Bridge → Buzz | `buzz messages send` / `buzz mem set`, or local outbox JSONL |
+| Buzz room ↔ ZeroClaw | `buzz-acp` spawns `zeroclaw acp` |

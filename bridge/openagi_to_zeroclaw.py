@@ -1,105 +1,180 @@
 #!/usr/bin/env python3
 """
-BuzzClawAGI Bridge v2
-OpenAGI (proactive brain) → ZeroClaw (hardened body) → Buzz (shared room)
+BuzzClawAGI Bridge v3
+OpenAGI (proactive brain) → ZeroClaw ACP (hardened body) → Buzz (shared room)
 """
 
-import os
-import time
+from __future__ import annotations
+
 import json
-import requests
+import logging
+import os
+import sys
+import time
 from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, Set
+
+from buzz_publisher import BuzzPublisher
+from openagi_client import OpenAgiClient
+from shared_memory import SharedMemory
+from signal_map import extract_remember_lines, normalize
+from zeroclaw_acp_client import open_acp_client
+
+# ── config ─────────────────────────────────────────────────────────
 
 OPENAGI_URL = os.getenv("OPENAGI_URL", "http://127.0.0.1:43210")
-ZEROCLAW_ACP_URL = os.getenv("ZEROCLAW_ACP_URL", "http://127.0.0.1:9001")
-BUZZ_CLI = os.getenv("BUZZ_CLI", "buzz-cli")  # if available in PATH
 POLL_INTERVAL = int(os.getenv("POLL_INTERVAL", "8"))
+DRY_RUN = os.getenv("DRY_RUN", "0") in ("1", "true", "yes")
+INCLUDE_OBS = os.getenv("INCLUDE_OBSERVATIONS", "0") in ("1", "true", "yes")
+STATE_DIR = Path(os.getenv("BRIDGE_STATE_DIR", ".bridge-state"))
+MAX_SEEN = int(os.getenv("BRIDGE_MAX_SEEN", "5000"))
+ONCE = os.getenv("BRIDGE_ONCE", "0") in ("1", "true", "yes")
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 
-def log(msg: str):
-    print(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}")
+logging.basicConfig(
+    level=getattr(logging, LOG_LEVEL, logging.INFO),
+    format="[%(asctime)s] %(levelname)s %(name)s: %(message)s",
+    datefmt="%H:%M:%S",
+)
+log = logging.getLogger("buzzclaw.bridge")
 
-def get_openagi_activity():
-    """Pull recent proactive signals / suggested skills / observations."""
-    endpoints = [
-        "/observations/search?q=act",
-        "/skills",
-        "/memory",
-    ]
-    results = []
-    for ep in endpoints:
+
+class SeenStore:
+    """Bounded dedup set persisted as JSON lines of ids."""
+
+    def __init__(self, path: Path, max_size: int = 5000):
+        self.path = path
+        self.max_size = max_size
+        self.ids: Set[str] = set()
+        self._load()
+
+    def _load(self) -> None:
+        if not self.path.exists():
+            return
         try:
-            r = requests.get(f"{OPENAGI_URL}{ep}", timeout=4)
-            if r.status_code == 200:
-                data = r.json()
-                if isinstance(data, list):
-                    results.extend(data)
-                elif isinstance(data, dict):
-                    results.append(data)
-        except Exception as e:
-            log(f"OpenAGI {ep} error: {e}")
-    return results
+            for line in self.path.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if line:
+                    self.ids.add(line)
+        except OSError as e:
+            log.warning("could not load seen store: %s", e)
 
-def call_zeroclaw(tool: str, args: dict):
-    """Send a tool call to ZeroClaw (ACP shape)."""
-    payload = {
-        "jsonrpc": "2.0",
-        "method": "tools/call",
-        "params": {
-            "name": tool,
-            "arguments": args
-        },
-        "id": int(time.time())
-    }
-    log(f"→ ZeroClaw tool={tool}")
+    def contains(self, sid: str) -> bool:
+        return sid in self.ids
+
+    def add(self, sid: str) -> None:
+        self.ids.add(sid)
+        if len(self.ids) > self.max_size:
+            # drop arbitrary older half by rewriting
+            keep = list(self.ids)[len(self.ids) // 2 :]
+            self.ids = set(keep)
+            self.path.write_text("\n".join(sorted(self.ids)) + "\n", encoding="utf-8")
+            return
+        try:
+            with self.path.open("a", encoding="utf-8") as f:
+                f.write(sid + "\n")
+        except OSError as e:
+            log.warning("seen store append failed: %s", e)
+
+
+def process_signal(
+    raw: Dict[str, Any],
+    *,
+    acp: Any,
+    buzz: BuzzPublisher,
+    memory: SharedMemory,
+    seen: SeenStore,
+) -> None:
+    sig = normalize(raw)
+    if seen.contains(sig.id):
+        return
+    seen.add(sig.id)
+
+    log.info("signal type=%s id=%s title=%s", sig.type, sig.id[:48], sig.title[:80])
+    prompt = sig.to_prompt()
+
+    if DRY_RUN:
+        log.info("[dry-run] prompt (%d chars):\n%s", len(prompt), prompt[:500])
+        buzz.post_message(f"[dry-run] OpenAGI signal `{sig.title}` ({sig.type})")
+        if sig.remember:
+            memory.write_fact(f"{sig.title}: {sig.body[:300]}", importance=sig.importance)
+        return
+
     try:
-        # When ZeroClaw exposes HTTP ACP this will work.
-        # Until then it prints the call so you can wire stdio.
-        r = requests.post(ZEROCLAW_ACP_URL, json=payload, timeout=10)
-        log(f"ZeroClaw response: {r.status_code}")
-        return r.json() if r.ok else None
+        result = acp.prompt(prompt)
     except Exception as e:
-        log(f"ZeroClaw call failed (expected if no HTTP ACP yet): {e}")
-        # Fallback: print the JSON-RPC so it can be piped into stdio ACP
-        print(json.dumps(payload))
-        return None
+        log.error("ZeroClaw ACP prompt failed: %s", e)
+        buzz.post_message(f"Bridge error on signal `{sig.title}`: {e}")
+        return
 
-def post_to_buzz(text: str):
-    """Best-effort post into Buzz (via buzz-cli if available)."""
-    log(f"Would post to Buzz: {text[:120]}...")
-    # Real version will use buzz-cli or direct Nostr event
+    summary = (result.content or "").strip()
+    log.info(
+        "ZeroClaw done stop=%s content_len=%d",
+        result.stop_reason,
+        len(summary),
+    )
+    post = (
+        f"**OpenAGI → ZeroClaw** `{sig.type}`: {sig.title}\n"
+        f"{summary[:1500] if summary else '(no content returned)'}"
+    )
+    pr = buzz.post_message(post)
+    log.info("Buzz post: %s %s", pr.mode, pr.detail)
 
-def process_signal(sig: dict):
-    """Map an OpenAGI signal into a ZeroClaw action."""
-    sig_type = str(sig.get("type", "")).lower()
-    name = str(sig.get("name", sig.get("skill", "unknown")))
+    facts = extract_remember_lines(summary)
+    if sig.remember and not facts:
+        facts = [f"{sig.title}: {sig.body[:400]}"]
+    for fact in facts:
+        mr = memory.write_fact(fact, importance=sig.importance)
+        log.info("memory write: %s", "; ".join(mr.details))
 
-    if "skill" in sig_type or "suggested" in str(sig).lower():
-        call_zeroclaw("run_skill", {"skill": name, "source": "openagi"})
-        post_to_buzz(f"OpenAGI suggested skill `{name}` — handed to ZeroClaw")
-    elif "act" in sig_type or "scrutiny" in str(sig).lower():
-        call_zeroclaw("shell", {"command": "echo 'proactive action received'"})
-        post_to_buzz(f"OpenAGI decided to act: {name}")
-    else:
-        log(f"Ignoring signal type: {sig_type}")
 
-def main():
-    log("BuzzClawAGI bridge v2 started")
-    log(f"OpenAGI  → {OPENAGI_URL}")
-    log(f"ZeroClaw → {ZEROCLAW_ACP_URL}")
+def main() -> int:
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    log.info("BuzzClawAGI bridge v3 starting")
+    log.info("OpenAGI  → %s", OPENAGI_URL)
+    log.info("DRY_RUN  → %s", DRY_RUN)
+    log.info("state    → %s", STATE_DIR.resolve())
 
-    seen = set()
+    openagi = OpenAgiClient(OPENAGI_URL)
+    buzz = BuzzPublisher(state_dir=str(STATE_DIR))
+    seen = SeenStore(STATE_DIR / "seen_ids.txt", max_size=MAX_SEEN)
 
-    while True:
-        signals = get_openagi_activity()
-        for sig in signals:
-            # crude dedup
-            key = json.dumps(sig, sort_keys=True)[:200]
-            if key in seen:
-                continue
-            seen.add(key)
-            process_signal(sig)
+    if not openagi.health():
+        log.warning(
+            "OpenAGI /health failed at %s — will keep polling (daemon may start later)",
+            OPENAGI_URL,
+        )
 
-        time.sleep(POLL_INTERVAL)
+    acp = open_acp_client(dry_run=DRY_RUN)
+    memory = SharedMemory(openagi=openagi, zeroclaw=None if DRY_RUN else acp, buzz=buzz, dry_run=DRY_RUN)
+
+    try:
+        while True:
+            try:
+                signals = openagi.collect_signals(include_observations=INCLUDE_OBS)
+                log.debug("polled %d raw items", len(signals))
+                for raw in signals:
+                    process_signal(raw, acp=acp, buzz=buzz, memory=memory, seen=seen)
+            except KeyboardInterrupt:
+                raise
+            except Exception as e:
+                log.exception("poll cycle error: %s", e)
+
+            if ONCE:
+                log.info("BRIDGE_ONCE set — exiting after one cycle")
+                break
+            time.sleep(POLL_INTERVAL)
+    except KeyboardInterrupt:
+        log.info("interrupted")
+    finally:
+        try:
+            acp.close()
+        except Exception:
+            pass
+
+    return 0
+
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
